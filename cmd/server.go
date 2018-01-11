@@ -3,6 +3,7 @@ package cmd
 import (
 	"flag"
 	"fmt"
+	"strings"
 	"log"
 	"net/http"
 	"os"
@@ -12,13 +13,14 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/russellcardullo/go-pingdom/pingdom"
+	"github.com/fhdoc/go-pingdom/pingdom"
 	"github.com/spf13/cobra"
+	"github.com/marpaia/graphite-golang"
 )
 
 var (
 	serverCmd = &cobra.Command{
-		Use:   "server [username] [password] [api-key]",
+		Use:   "server [username] [password] [api-key] [email-owner] [graphite-host] [graphite-port]",
 		Short: "Start the HTTP server",
 		Run:   serverRun,
 	}
@@ -34,18 +36,18 @@ var (
 	pingdomCheckStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pingdom_check_status",
 		Help: "The current status of the check (0: up, 1: unconfirmed_down, 2: down, -1: paused, -2: unknown)",
-	}, []string{"id", "name", "hostname", "resolution", "paused"})
+	}, []string{"id", "name", "hostname", "resolution", "paused", "tags"})
 
 	pingdomCheckResponseTime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pingdom_check_response_time",
 		Help: "The response time of last test in milliseconds",
-	}, []string{"id", "name", "hostname", "resolution", "paused"})
+	}, []string{"id", "name", "hostname", "resolution", "paused", "tags"})
 )
 
 func init() {
 	RootCmd.AddCommand(serverCmd)
 
-	serverCmd.Flags().IntVar(&waitSeconds, "wait", 10, "time (in seconds) between accessing the Pingdom  API")
+	serverCmd.Flags().IntVar(&waitSeconds, "wait", 60, "time (in seconds) between accessing the Pingdom  API")
 	serverCmd.Flags().IntVar(&port, "port", 8000, "port to listen on")
 
 	prometheus.MustRegister(pingdomUp)
@@ -60,16 +62,19 @@ func sleep() {
 func serverRun(cmd *cobra.Command, args []string) {
 	flag.Parse()
 
-	if len(cmd.Flags().Args()) != 3 {
+	if len(cmd.Flags().Args()) != 6 {
 		cmd.Help()
 		os.Exit(1)
 	}
 
-	client := pingdom.NewClient(
+	client := pingdom.NewMultiUserClient(
 		flag.Arg(1),
 		flag.Arg(2),
 		flag.Arg(3),
+		flag.Arg(4), 
 	)
+
+	graphPort, _ := strconv.Atoi(flag.Arg(6))
 
 	go func() {
 		for {
@@ -110,6 +115,15 @@ func serverRun(cmd *cobra.Command, args []string) {
 				if check.Status == "paused" {
 					paused = "true"
 				}
+				
+				checkResponse, _ := client.Checks.Read(check.ID)	
+
+				var allTags []string 
+				for _, value := range checkResponse.Tags {
+					allTags = append(allTags, value["name"] )
+				}
+
+				dataTags := strings.Join(allTags, ",")
 
 				pingdomCheckStatus.WithLabelValues(
 					id,
@@ -117,7 +131,9 @@ func serverRun(cmd *cobra.Command, args []string) {
 					check.Hostname,
 					resolution,
 					paused,
+					dataTags,
 				).Set(status)
+
 
 				pingdomCheckResponseTime.WithLabelValues(
 					id,
@@ -125,7 +141,26 @@ func serverRun(cmd *cobra.Command, args []string) {
 					check.Hostname,
 					resolution,
 					paused,
+					dataTags,
 				).Set(float64(check.LastResponseTime))
+
+
+        			Graphite, err := graphite.NewGraphite(flag.Arg(5), graphPort)
+        			if err != nil {
+                			log.Println("Error connecting graphite ", err)
+        			} else {
+					graphPath := "pingdom.CheckResponseTime." +check.Name+ ".value" 
+					responseTime := fmt.Sprintf("%v", check.LastResponseTime)
+					metric := graphite.NewMetric(graphPath, responseTime, checkResponse.LastTestTime)
+					Graphite.SendMetric(metric)
+					log.Println("Metric responseTime ", metric)
+                                	graphPath = "pingdom.CheckStatus." +check.Name+ ".value"
+					checkStatus := fmt.Sprintf("%v", status)
+                                	metric = graphite.NewMetric(graphPath, checkStatus, checkResponse.LastTestTime)
+					log.Println("Metric status ", metric)
+                                	Graphite.SendMetric(metric)
+					Graphite.Disconnect()
+				}	
 			}
 
 			sleep()
