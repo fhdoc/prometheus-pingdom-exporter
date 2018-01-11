@@ -71,7 +71,12 @@ func serverRun(cmd *cobra.Command, args []string) {
 		flag.Arg(1),
 		flag.Arg(2),
 		flag.Arg(3),
+<<<<<<< HEAD
 		flag.Arg(4), 
+||||||| merged common ancestors
+=======
+		flag.Arg(4), //"r.hanna@criteo.com"
+>>>>>>> b1fe3eb2638c353a93a24dae0526a6fdd4861e45
 	)
 
 	graphPort, _ := strconv.Atoi(flag.Arg(6))
@@ -143,6 +148,7 @@ func serverRun(cmd *cobra.Command, args []string) {
 					paused,
 					dataTags,
 				).Set(float64(check.LastResponseTime))
+<<<<<<< HEAD
 
 
         			Graphite, err := graphite.NewGraphite(flag.Arg(5), graphPort)
@@ -161,6 +167,27 @@ func serverRun(cmd *cobra.Command, args []string) {
                                 	Graphite.SendMetric(metric)
 					Graphite.Disconnect()
 				}	
+||||||| merged common ancestors
+=======
+
+
+        			Graphite, err := graphite.NewGraphite(flag.Arg(5), graphPort)
+        			if err != nil {
+                			log.Println("Error connecting graphite ", err)
+        			} else {
+					graphPath := "criteo.pingdom.CheckResponseTime." +check.Name+ ".value" 
+					responseTime := fmt.Sprintf("%v", check.LastResponseTime)
+					metric := graphite.NewMetric(graphPath, responseTime, checkResponse.LastTestTime)
+					Graphite.SendMetric(metric)
+					log.Println("Metric responseTime ", metric)
+                                	graphPath = "criteo.pingdom.CheckStatus." +check.Name+ ".value"
+					checkStatus := fmt.Sprintf("%v", status)
+                                	metric = graphite.NewMetric(graphPath, checkStatus, checkResponse.LastTestTime)
+					log.Println("Metric status ", metric)
+                                	Graphite.SendMetric(metric)
+					Graphite.Disconnect()
+				}	
+>>>>>>> b1fe3eb2638c353a93a24dae0526a6fdd4861e45
 			}
 
 			sleep()
